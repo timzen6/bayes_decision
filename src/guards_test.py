@@ -7,7 +7,7 @@ import pymc as pm
 import seaborn as sns
 from sklearn.metrics import accuracy_score, log_loss
 
-from sampling import prepare_data, pre_sampling_stats, flat_strat_sampling
+from sampling import flat_strat_sampling, pre_sampling_stats, prepare_data
 
 # df = pd.read_csv("../contracted_test_data/new_domains/2022-10-31-28/train.csv")
 # df_compact = pd.read_csv("../contracted_test_data/new_domains/2022-10-31-28/train_compact.csv")
@@ -15,15 +15,8 @@ from sampling import prepare_data, pre_sampling_stats, flat_strat_sampling
 df = pd.read_csv("data/contracted_test_data/new_domains/2022-10-31-28/train.csv")
 print(df.head().to_markdown())
 
-df = (
-    df
-    .pipe(prepare_data)
-    .pipe(pre_sampling_stats)
-)
-df_sample = (
-    flat_strat_sampling(df, 200)
-    .pipe(pre_sampling_stats)
-)
+df = df.pipe(prepare_data).pipe(pre_sampling_stats)
+df_sample = flat_strat_sampling(df, 200).pipe(pre_sampling_stats)
 
 
 df_compact = (
