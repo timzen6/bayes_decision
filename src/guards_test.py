@@ -26,8 +26,6 @@ df_sample = (
 )
 
 
-exit()
-
 df_compact = (
     df_compact
     # .sample(n=10000, weights="weight", random_state=2)
