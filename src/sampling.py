@@ -3,14 +3,26 @@ import pandas as pd
 
 n_mail_intervals = [-np.inf, 1, 5, 50, np.inf]
 
+#just a very simplified version
+def get_tld_category(tld_ser):
+    return tld_ser.mask(~tld_ser.isin(("de", "com")), "unknown")
 
 def prepare_data(df):
-    df = df.assign(
-        mail_strat=lambda df: pd.cut(
-            df.nMail, n_mail_intervals, labels=range(len(n_mail_intervals) - 1)
-        ),
-        # weight = lambda df: np.log10(df.nMail)+1,
-        weight=lambda df: df.nMail,
+    df = (
+        df
+        [lambda df: df.deltaT==60]
+        .assign(
+            category = lambda df: get_tld_category(df.Tld),
+            nMailLog = lambda df: np.log2(df.nMail)+1,
+            nSubdomainLog = lambda df: np.log2(df.nSubdomain)+1,
+            isTrusted = lambda df: (df.nTrusted > 0).astype(int),
+        )
+        .pipe(lambda df: pd.concat([
+            df,
+            pd.get_dummies(df.category).add_prefix("is_")
+        ], axis=1))
+        .drop(columns=["category", "is_unknown"])
+        .reset_index(drop=True)
     )
     return df
 
@@ -27,27 +39,6 @@ def pre_sampling_stats(df):
         .assign(
             rDomain=lambda df: df.Domain.pipe(lambda s: s / s.sum()),
             rWeight=lambda df: df.weight.pipe(lambda s: s / s.sum()),
-        )
-        .to_markdown()
-    )
-    print(
-        df.assign(
-            w_mal=lambda df: df.label * df.weight,
-        )
-        .groupby("mail_strat")
-        .agg(
-            dict(
-                Domain="count",
-                weight="sum",
-                w_mal="sum",
-                label="sum",
-            )
-        )
-        .assign(
-            rStrat=lambda df: df.Domain / df.Domain.sum(),
-            wStrat=lambda df: df.weight / df.weight.sum(),
-            rlabel=lambda df: df.label / df.Domain,
-            wlabel=lambda df: df.w_mal / df.weight,
         )
         .to_markdown()
     )

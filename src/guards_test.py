@@ -9,38 +9,34 @@ from sklearn.metrics import accuracy_score, log_loss
 
 from sampling import flat_strat_sampling, pre_sampling_stats, prepare_data
 
-# df = pd.read_csv("../contracted_test_data/new_domains/2022-10-31-28/train.csv")
-# df_compact = pd.read_csv("../contracted_test_data/new_domains/2022-10-31-28/train_compact.csv")
 
-df = pd.read_csv("data/contracted_test_data/new_domains/2022-10-31-28/train.csv")
-print(df.head().to_markdown())
-
+print("Training")
+df = pd.read_parquet("data/train.parquet")
 df = df.pipe(prepare_data).pipe(pre_sampling_stats)
-df_sample = flat_strat_sampling(df, 200).pipe(pre_sampling_stats)
 
-
-df_compact = (
-    df_compact
-    # .sample(n=10000, weights="weight", random_state=2)
-    .sample(n=10000, random_state=2)
+print("Test")
+df_test = (
+    pd.read_parquet("data/test.parquet")
+    .pipe(prepare_data)
+    .pipe(pre_sampling_stats)
 )
 
-df_compact = pd.concat(
-    [df_compact, pd.get_dummies(df_compact.category).add_prefix("is_")], axis=1
-).drop(columns=["is_unknown", "category"])
+all_input_cols = [c for c in df.columns if c not in ("label", "weight")]
+print(df.columns)
 
-all_input_cols = [c for c in df_compact.columns if c not in ("label", "weight")]
-print(df_compact.columns)
-
-input_cols = ["nMail", "nSubdomain", "is_com", "is_de"]
+input_cols = ["nMailLog", "nSubdomainLog", "is_com", "is_de", "isTrusted"]
 # input_cols = [c for c in all_input_cols if (c not in ["nSubdomain5"] and not c.startswith("keyword"))]
 
-with pm.Model() as model:
-    x = df_compact[input_cols].to_numpy()
-    # w = df_compact["weight"].to_numpy()
-    w = np.log10(df_compact["weight"].to_numpy())
-    labels = df_compact["label"].to_numpy()
+# TODO: basic normalizing of inputs 
+x_input =  x = df[input_cols].to_numpy()
+# w = df["weight"].to_numpy()
+w = ((len(df)/df.weight.sum())*df["weight"]).to_numpy()
+# w = np.log10(df["weight"].to_numpy()) + 1
+labels = df["label"].to_numpy()
 
+with pm.Model() as model:
+
+    x = pm.MutableData("x", x_input)
     m = pm.Normal("m", 0, sigma=10, shape=len(input_cols))
     b = pm.Normal("b", 0, sigma=10)
 
@@ -54,13 +50,35 @@ with pm.Model() as model:
     logp = w * pm.logp(pm.Bernoulli.dist(p=mu), labels)
     pm.Deterministic("logp", logp)
     error = pm.Potential("error", logp)
-    trace = pm.sample()
+    trace = pm.sample(500)
 
 summary = az.summary(trace, var_names=["m", "b"]).assign(
     input_names=input_cols + ["intercept"]
 )
 summary = summary[["input_names"] + [c for c in summary.columns if c != "input_names"]]
 print(summary.to_markdown())
+
+# Performance calculations with any data on fitted model
+with model:
+    pm.set_data(dict(
+        x=df_test[input_cols]
+    ))
+    ppc = pm.sample_posterior_predictive(trace, var_names=["mu"])
+
+ppc_mu = ppc.posterior_predictive.mu
+df_prediction = pd.DataFrame(dict(
+    mu_avg = np.mean(ppc_mu, axis=(0,1)),
+    mu_std = np.std(ppc_mu, axis=(0,1)),
+    label = df_test.label,
+    weight=df_test.weight
+))
+print(df_prediction.head(20).to_markdown())
+print(accuracy_score(
+    df_prediction.label,
+    (df_prediction.mu_avg>0.5).astype(int),
+    sample_weight=df_prediction.weight,
+))
+exit()
 
 az.plot_trace(trace, var_names=["m", "b"])
 plt.savefig("figures/guards_trace.png")
@@ -116,13 +134,13 @@ print(df_score.to_markdown())
 
 
 fig = px.scatter(
-    df_compact.assign(
+    df.assign(
         dummy="unkown",
         cat=lambda df: df.dummy.mask(df.is_de > 0, "de").mask(df.is_com > 0, "com"),
         mu=np.mean(stacked.mu, axis=1),
         mu_err=np.std(stacked.mu, axis=1),
     )
-    .sample(n=min(500, len(df_compact)), random_state=42)
+    .sample(n=min(500, len(df)), random_state=42)
     .astype(dict(label="str")),
     x="nMail",
     y="mu",
